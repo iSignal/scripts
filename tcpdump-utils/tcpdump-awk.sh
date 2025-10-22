@@ -8,8 +8,8 @@ BEGIN {
     start_time = 0
     interval = 5  # 5 seconds
     print "Starting tcpdump analysis..."
-    print "Format: timestamp | src_ip:src_port -> dst_ip:dst_port | packets | bytes | resets | errors"
-    print "=================================================================================="
+    print "timestamp | connection | packets | bytes | resets | fins | errors"
+    print "=================================================================="
 }
 
 # Skip comment lines and empty lines
@@ -61,18 +61,15 @@ BEGIN {
                 dst_port = dst_parts[5]
             }
 
-            # Create connection key (normalize to always have smaller IP first)
-            if (src_ip < dst_ip || (src_ip == dst_ip && src_port < dst_port)) {
-                conn_key = src_ip ":" src_port "->" dst_ip ":" dst_port
-            } else {
-                conn_key = dst_ip ":" dst_port "->" src_ip ":" src_port
-            }
+            # Create connection key (track each direction separately)
+            conn_key = src_ip ":" src_port "->" dst_ip ":" dst_port
 
             # Initialize connection stats if not exists
             if (!(conn_key in packets)) {
                 packets[conn_key] = 0
                 bytes[conn_key] = 0
                 resets[conn_key] = 0
+                fins[conn_key] = 0
                 errors[conn_key] = 0
             }
 
@@ -90,8 +87,13 @@ BEGIN {
                 resets[conn_key]++
             }
 
-            # Check for connection errors
-            if (match($0, /Flags \[.*F.*\]/) || match($0, /Flags \[.*R.*\]/) || match($0, /ICMP/)) {
+            # Check for connection closes (F flag - FIN)
+            if (match($0, /Flags \[.*F.*\]/)) {
+                fins[conn_key]++
+            }
+
+            # Check for other connection errors (ICMP, etc.)
+            if (match($0, /ICMP/)) {
                 errors[conn_key]++
             }
         }
@@ -100,11 +102,10 @@ BEGIN {
     # Check if 5 seconds have passed
     if (current_time - start_time >= interval) {
         # Output statistics for all connections
-        print "\n=== Statistics at " timestamp_str " ==="
         for (conn in packets) {
             if (packets[conn] > 0) {
-                printf "%s | %s | %d packets | %d bytes | %d resets | %d errors\n",
-                       timestamp_str, conn, packets[conn], bytes[conn], resets[conn], errors[conn]
+                printf "%s | %s | %d p | %d b | %d r | %d f | %d e\n",
+                       timestamp_str, conn, packets[conn], bytes[conn], resets[conn], fins[conn], errors[conn]
             }
         }
 
@@ -112,6 +113,7 @@ BEGIN {
         delete packets
         delete bytes
         delete resets
+        delete fins
         delete errors
         start_time = current_time
     }
@@ -122,8 +124,8 @@ END {
     print "\n=== Final Statistics ==="
     for (conn in packets) {
         if (packets[conn] > 0) {
-            printf "%s | %s | %d packets | %d bytes | %d resets | %d errors\n",
-                   timestamp_str, conn, packets[conn], bytes[conn], resets[conn], errors[conn]
+            printf "%s | %s | %d p | %d b | %d r | %d f | %d e\n",
+                   timestamp_str, conn, packets[conn], bytes[conn], resets[conn], fins[conn], errors[conn]
         }
     }
 }
